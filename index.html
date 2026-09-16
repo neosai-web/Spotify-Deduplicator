@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spotify アーティスト全曲・重複なしプレイリスト作成ツール</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col items-center justify-center p-4">
+
+    <div class="max-w-xl w-full bg-slate-800 rounded-xl shadow-2xl p-6 border border-slate-700">
+        <header class="mb-6 text-center">
+            <h1 class="text-2xl font-bold text-green-400">Spotify 究極のベスト作成ツール</h1>
+            <p class="text-sm text-slate-400 mt-1">リマスターや別盤の重複を除外したクリーンなプレイリストを自動作成します</p>
+        </header>
+
+        <!-- ステップ1: 認証画面 -->
+        <section id="auth-section" class="text-center py-6">
+            <p class="mb-4 text-slate-300">利用を開始するにはSpotifyアカウントでログインしてください。</p>
+            <button id="login-btn" class="bg-green-500 hover:bg-green-600 text-slate-950 font-bold px-6 py-3 rounded-full transition shadow-lg">
+                Spotifyでログイン
+            </button>
+        </section>
+
+        <!-- ステップ2: 検索・実行画面 (初期非表示) -->
+        <section id="app-section" class="hidden space-y-5">
+            <div>
+                <label class="block text-sm font-medium text-slate-300 mb-1">アーティスト名検索</label>
+                <div class="flex gap-2">
+                    <input type="text" id="artist-input" placeholder="例: B'z, 宇多田ヒカル" class="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 focus:outline-none focus:border-green-500 text-slate-100">
+                    <button id="search-btn" class="bg-green-500 hover:bg-green-600 text-slate-950 font-semibold px-4 py-2 rounded-lg transition">検索</button>
+                </div>
+            </div>
+
+            <!-- アーティスト候補リスト -->
+            <div id="artist-results" class="space-y-2 max-h-48 overflow-y-auto"></div>
+
+            <!-- 選択中アーティスト & 実行ボタン -->
+            <div id="selected-artist-container" class="hidden bg-slate-900 p-4 rounded-lg border border-slate-700 space-y-3">
+                <p class="text-sm text-slate-300">選択中: <span id="selected-artist-name" class="font-bold text-green-400"></span></p>
+                <button id="generate-btn" class="w-full bg-green-500 hover:bg-green-600 text-slate-950 font-bold py-3 rounded-lg transition shadow-md">
+                    全曲重複なしプレイリストを作成する
+                </button>
+            </div>
+
+            <!-- 進捗状況 -->
+            <div id="progress-container" class="hidden space-y-2">
+                <div class="flex justify-between text-sm text-slate-400">
+                    <span id="progress-text">処理中...</span>
+                    <span id="progress-percent">0%</span>
+                </div>
+                <div class="w-full bg-slate-900 rounded-full h-2.5 overflow-hidden">
+                    <div id="progress-bar" class="bg-green-500 h-2.5 w-0 transition-all duration-300"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ステップ3: 結果表示画面 (初期非表示) -->
+        <section id="result-section" class="hidden text-center space-y-4 py-4">
+            <div class="bg-slate-900 p-4 rounded-lg border border-slate-700 space-y-2 text-left">
+                <h3 class="font-bold text-green-400 text-center mb-3">作成完了！</h3>
+                <p class="text-sm flex justify-between"><span>取得総トラック数:</span> <span id="res-total" class="font-mono">0</span></p>
+                <p class="text-sm flex justify-between"><span>重複除外された曲数:</span> <span id="res-duplicates" class="font-mono text-red-400">0</span></p>
+                <p class="text-sm flex justify-between border-t border-slate-800 pt-2 font-bold"><span>最終プレイリスト曲数:</span> <span id="res-final" class="font-mono text-green-400">0</span></p>
+            </div>
+            <a id="playlist-link" href="#" target="_blank" class="inline-block w-full bg-green-500 hover:bg-green-600 text-slate-950 font-bold py-3 rounded-lg transition text-center shadow-lg">
+                Spotifyでプレイリストを開く
+            </a>
+            <button id="reset-btn" class="text-sm text-slate-400 hover:text-slate-200 underline">別のアーティストで作成する</button>
+        </section>
+    </div>
+
+    <!-- JavaScriptロジック -->
+    <script>
+        // 設定: ご自身のSpotify Developer Dashboardで取得したClient IDに書き換えてください
+        const CLIENT_ID = '90d63e191b7e407bade9fff0a5151a09'; 
+        const REDIRECT_URI = window.location.origin + window.location.pathname;
+        const SCOPES = 'playlist-modify-public playlist-modify-private user-read-private';
+
+        let accessToken = null;
+        let selectedArtist = null;
+
+        // PKCE 用のユーティリティ関数
+        function generateRandomString(length) {
+            let text = '';
+            const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+            for (let i = 0; i < length; i++) {
+                text += possible.charAt(Math.floor(Math.random() * possible.length));
+            }
+            return text;
+        }
+
+        async function generateCodeChallenge(codeVerifier) {
+            const data = new TextEncoder().encode(codeVerifier);
+            const digest = await window.crypto.subtle.digest('SHA-256', data);
+            return btoa(String.fromCharCode.apply(null, [...new Uint8Array(digest)]))
+                .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        }
+
+        // 初期化処理（リダイレクト後のコード検証）
+        window.addEventListener('DOMContentLoaded', async () => {
+            const params = new URLSearchParams(window.location.search);
+            const code = params.get('code');
+
+            if (code) {
+                const codeVerifier = localStorage.getItem('spotify_code_verifier');
+                if (codeVerifier) {
+                    try {
+                        const response = await fetch('https://accounts.spotify.com/api/token', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                            body: new URLSearchParams({
+                                client_id: CLIENT_ID,
+                                grant_type: 'authorization_code',
+                                code: code,
+                                redirect_uri: REDIRECT_URI,
+                                code_verifier: codeVerifier,
+                            }),
+                        });
+                        const data = await response.json();
+                        if (data.access_token) {
+                            accessToken = data.access_token;
+                            window.history.replaceState({}, document.title, REDIRECT_URI); // URLを綺麗にする
+                            showAppSection();
+                        } else {
+                            alert('認証に失敗しました。');
+                        }
+                    } catch (err) {
+                        console.error(err);
+                        alert('トークン取得中にエラーが発生しました。');
+                    }
+                }
+            }
+        });
+
+        // ログインボタン
+        document.getElementById('login-btn').addEventListener('click', async () => {
+            if (CLIENT_ID === 'YOUR_SPOTIFY_CLIENT_ID') {
+                alert('ソースコード内の CLIENT_ID をご自身のSpotifyアプリのものに書き換えてください。');
+                return;
+            }
+            const codeVerifier = generateRandomString(64);
+            const codeChallenge = await generateCodeChallenge(codeVerifier);
+            localStorage.setItem('spotify_code_verifier', codeVerifier);
+
+            const authUrl = new URL('https://accounts.spotify.com/authorize');
+            authUrl.searchParams.append('client_id', CLIENT_ID);
+            authUrl.searchParams.append('response_type', 'code');
+            authUrl.searchParams.append('redirect_uri', REDIRECT_URI);
+            authUrl.searchParams.append('code_challenge_method', 'S256');
+            authUrl.searchParams.append('code_challenge', codeChallenge);
+            authUrl.searchParams.append('scope', SCOPES);
+
+            window.location.href = authUrl.toString();
+        });
+
+        function showAppSection() {
+            document.getElementById('auth-section').classList.add('hidden');
+            document.getElementById('app-section').classList.remove('hidden');
+        }
+
+        // アーティスト検索
+        document.getElementById('search-btn').addEventListener('click', async () => {
+            const query = document.getElementById('artist-input').value.trim();
+            if (!query) return;
+
+            const res = await fetch(`https://api.spotify.com/v1/search?type=artist&q=${encodeURIComponent(query)}&limit=5`, {
+                headers: { 'Authorization': `Bearer ${accessToken}` }
+            });
+            const data = await res.json();
+            const resultsContainer = document.getElementById('artist-results');
+            resultsContainer.innerHTML = '';
+
+            if (data.artists && data.artists.items.length > 0) {
+                data.artists.items.forEach(artist => {
+                    const div = document.createElement('div');
+                    div.className = 'flex items-center justify-between bg-slate-900 p-2 rounded border border-slate-700 hover:border-green-500 cursor-pointer transition';
+                    div.innerHTML = `
+                        <span class="font-medium">${artist.name}</span>
+                        <span class="text-xs text-slate-400">フォロワー: ${artist.followers.total.toLocaleString()}</span>
+                    `;
+                    div.addEventListener('click', () => {
+                        selectedArtist = artist;
+                        document.getElementById('selected-artist-name').textContent = artist.name;
+                        document.getElementById('selected-artist-container').classList.remove('hidden');
+                        resultsContainer.innerHTML = '';
+                    });
+                    resultsContainer.appendChild(div);
+                });
+            } else {
+                resultsContainer.innerHTML = '<p class="text-sm text-slate-400 text-center">アーティストが見つかりませんでした。</p>';
+            }
+        });
+
+        // プレイリスト作成のメイン処理
+        document.getElementById('generate-btn').addEventListener('click', async () => {
+            if (!selectedArtist) return;
+
+            document.getElementById('app-section').classList.add('hidden');
+            const progressContainer = document.getElementById('progress-container');
+            progressContainer.classList.remove('hidden');
+
+            const updateProgress = (text, percent) => {
+                document.getElementById('progress-text').textContent = text;
+                document.getElementById('progress-percent').textContent = `${percent}%`;
+                document.getElementById('progress-bar').style.width = `${percent}%`;
+            };
+
+            try {
+                updateProgress('アルバム情報を取得中...', 10);
+
+                // 2.3 全曲データの取得
+                let albums = [];
+                let url = `https://api.spotify.com/v1/artists/${selectedArtist.id}/albums?include_groups=album,single&limit=50`;
+                
+                while (url) {
+                    const res = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
+                    const data = await res.json();
+                    albums.push(...data.items);
+                    url = data.next;
+                    // レートリミット対策・軽いウェイト
+                    await new Promise(r => setTimeout(r, 100));
+                }
+
+                updateProgress('トラックリストを取得中...', 30);
+                let allTracks = [];
+                let processedAlbums = 0;
+
+                for (const album of albums) {
+                    let trackUrl = `https://api.spotify.com/v1/albums/${album.id}/tracks?limit=50`;
+                    while (trackUrl) {
+                        const res = await fetch(trackUrl, { headers: { 'Authorization': `Bearer ${accessToken}` } });
+                        if (res.status === 429) {
+                            // レートリミット時は少し待機
+                            const retryAfter = res.headers.get('Retry-After') || 2;
+                            await new Promise(r => setTimeout(r, retryAfter * 1000));
+                            continue;
+                        }
+                        const data = await res.json();
+                        if (data.items) {
+                            data.items.forEach(track => {
+                                allTracks.push({
+                                    id: track.id,
+                                    uri: track.uri,
+                                    name: track.name,
+                                    duration_ms: track.duration_ms
+                                });
+                            });
+                        }
+                        trackUrl = data.next;
+                    }
+                    processedAlbums++;
+                    let p = 30 + Math.floor((processedAlbums / albums.length) * 40);
+                    updateProgress(`トラック取得中 (${processedAlbums}/${albums.length} アルバム)...`, p);
+                    await new Promise(r => setTimeout(r, 50)); // 負荷軽減
+                }
+
+                const totalFetched = allTracks.length;
+                updateProgress('重複排除処理を実行中...', 75);
+
+                // 2.4 高度な重複排除ロジック
+                const normalizeTrackName = (name) => {
+                    return name
+                        .toLowerCase()
+                        .normalize('NFKC')
+                        // 括弧書きやリマスター表記などを除去
+                        .replace(/[\(\（].*?(remaster|live|mix|version|edit|mono|stereo|bonus|ic|ver\.?|alt).*?[\)\）]/gi, '')
+                        .replace(/-\s*(remaster(ed)?|live|mono|stereo).*$/gi, '')
+                        .trim();
+                };
+
+                const uniqueTracksMap = new Map();
+                allTracks.forEach(track => {
+                    const cleanName = normalizeTrackName(track.name);
+                    if (!cleanName) return;
+
+                    // 曲の長さ（秒単位、許容差 ±2秒 = 2000ms）ですでに登録されているものがないか走査
+                    let isDuplicate = false;
+                    for (let [key, existingTrack] of uniqueTracksMap.entries()) {
+                        if (key === cleanName) {
+                            if (Math.abs(existingTrack.duration_ms - track.duration_ms) <= 2000) {
+                                isDuplicate = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (!isDuplicate) {
+                        // キーとして正規化名を使用（必要に応じてdurationも加味）
+                        uniqueTracksMap.set(cleanName, track);
+                    }
+                });
+
+                const finalTracks = Array.from(uniqueTracksMap.values());
+                const duplicateCount = totalFetched - finalTracks.length;
+
+                updateProgress('Spotifyにプレイリストを作成中...', 90);
+
+                // 2.5 プレイリストの作成と曲の追加
+                const userRes = await fetch('https://api.spotify.com/v1/me', {
+                    headers: { 'Authorization': `Bearer ${accessToken}` }
+                });
+                const userData = await userRes.json();
+
+                const createPlaylistRes = await fetch(`https://api.spotify.com/v1/users/${userData.id}/playlists`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        name: `${selectedArtist.name} - 究極のベスト (重複なし)`,
+                        description: 'Generated automatically by Spotify Unique Album Creator',
+                        public: false
+                    })
+                });
+                const playlistData = await createPlaylistRes.json();
+
+                // 100曲ずつ分割して追加
+                const uris = finalTracks.map(t => t.uri);
+                for (let i = 0; i < uris.length; i += 100) {
+                    const chunk = uris.slice(i, i + 100);
+                    await fetch(`https://api.spotify.com/v1/playlists/${playlistData.id}/tracks`, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${accessToken}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ uris: chunk })
+                    });
+                }
+
+                updateProgress('完了！', 100);
+                setTimeout(() => {
+                    progressContainer.classList.add('hidden');
+                    document.getElementById('result-section').classList.remove('hidden');
+                    document.getElementById('res-total').textContent = totalFetched;
+                    document.getElementById('res-duplicates').textContent = duplicateCount;
+                    document.getElementById('res-final').textContent = finalTracks.length;
+                    document.getElementById('playlist-link').href = playlistData.external_urls.spotify;
+                }, 500);
+
+            } catch (err) {
+                console.error(err);
+                alert('エラーが発生しました。コンソールを確認してください。');
+                location.reload();
+            }
+        });
+
+        // リセットボタン
+        document.getElementById('reset-btn').addEventListener('click', () => {
+            document.getElementById('result-section').classList.add('hidden');
+            document.getElementById('app-section').classList.remove('hidden');
+            document.getElementById('selected-artist-container').classList.add('hidden');
+            document.getElementById('artist-input').value = '';
+            selectedArtist = null;
+        });
+    </script>
+</body>
+</html>
