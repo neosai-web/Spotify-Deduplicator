@@ -73,7 +73,6 @@
 
     <!-- JavaScriptロジック -->
     <script>
-        // 設定: ご自身のSpotify Developer Dashboardで取得したClient IDに書き換えてください
         const CLIENT_ID = '90d63e191b7e407bade9fff0a5151a09'; 
         const REDIRECT_URI = window.location.origin + window.location.pathname;
         const SCOPES = 'playlist-modify-public playlist-modify-private user-read-private';
@@ -81,7 +80,6 @@
         let accessToken = null;
         let selectedArtist = null;
 
-        // PKCE 用のユーティリティ関数
         function generateRandomString(length) {
             let text = '';
             const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -98,7 +96,6 @@
                 .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
         }
 
-        // 初期化処理（リダイレクト後のコード検証）
         window.addEventListener('DOMContentLoaded', async () => {
             const params = new URLSearchParams(window.location.search);
             const code = params.get('code');
@@ -134,12 +131,7 @@
             }
         });
 
-        // ログインボタン
         document.getElementById('login-btn').addEventListener('click', async () => {
-            if (CLIENT_ID === 'YOUR_SPOTIFY_CLIENT_ID') {
-                alert('ソースコード内の CLIENT_ID をご自身のSpotifyアプリのものに書き換えてください。');
-                return;
-            }
             const codeVerifier = generateRandomString(64);
             const codeChallenge = await generateCodeChallenge(codeVerifier);
             localStorage.setItem('spotify_code_verifier', codeVerifier);
@@ -160,7 +152,6 @@
             document.getElementById('app-section').classList.remove('hidden');
         }
 
-        // アーティスト検索
         document.getElementById('search-btn').addEventListener('click', async () => {
             const query = document.getElementById('artist-input').value.trim();
             if (!query) return;
@@ -193,7 +184,6 @@
             }
         });
 
-        // プレイリスト作成のメイン処理
         document.getElementById('generate-btn').addEventListener('click', async () => {
             if (!selectedArtist) return;
 
@@ -307,12 +297,12 @@
                         public: false
                     })
                 });
+
                 if (!createPlaylistRes.ok) {
                     const errData = await createPlaylistRes.json();
                     throw new Error(`プレイリスト作成エラー: ${errData.error?.message || createPlaylistRes.statusText}`);
                 }
 
-                const playlistData = await createPlaylistRes.json();
                 const playlistData = await createPlaylistRes.json();
 
                 const uris = finalTracks.map(t => t.uri);
@@ -340,12 +330,11 @@
 
             } catch (err) {
                 console.error(err);
-                alert('エラーが発生しました。コンソールを確認してください。');
+                alert(err.message || 'エラーが発生しました。コンソールを確認してください。');
                 location.reload();
             }
         });
 
-        // リセットボタン
         document.getElementById('reset-btn').addEventListener('click', () => {
             document.getElementById('result-section').classList.add('hidden');
             document.getElementById('app-section').classList.remove('hidden');
