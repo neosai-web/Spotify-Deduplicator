@@ -74,7 +74,7 @@
     <!-- JavaScriptロジック -->
     <script>
         // 設定: ご自身のSpotify Developer Dashboardで取得したClient IDに書き換えてください
-        const CLIENT_ID = '90d63e191b7e407bade9fff0a5151a09'; 
+        const CLIENT_ID = 'YOUR_SPOTIFY_CLIENT_ID'; 
         const REDIRECT_URI = window.location.origin + window.location.pathname;
         const SCOPES = 'playlist-modify-public playlist-modify-private user-read-private';
 
@@ -121,7 +121,7 @@
                         const data = await response.json();
                         if (data.access_token) {
                             accessToken = data.access_token;
-                            window.history.replaceState({}, document.title, REDIRECT_URI); // URLを綺麗にする
+                            window.history.replaceState({}, document.title, REDIRECT_URI);
                             showAppSection();
                         } else {
                             alert('認証に失敗しました。');
@@ -177,9 +177,8 @@
                     const div = document.createElement('div');
                     div.className = 'flex items-center justify-between bg-slate-900 p-2 rounded border border-slate-700 hover:border-green-500 cursor-pointer transition';
                     div.innerHTML = `
-    　　　　　　　　　　　<span class="font-medium">${artist.name}</span>
-    　　　　　　　　　　　<span class="text-xs text-slate-400">フォロワー: ${(artist.followers?.total ?? 0).toLocaleString()}</span>
-　　　　　　　　　　　`;
+                        <span class="font-medium">${artist.name}</span>
+                        <span class="text-xs text-slate-400">フォロワー: ${(artist.followers?.total ?? 0).toLocaleString()}</span>
                     `;
                     div.addEventListener('click', () => {
                         selectedArtist = artist;
@@ -211,7 +210,6 @@
             try {
                 updateProgress('アルバム情報を取得中...', 10);
 
-                // 2.3 全曲データの取得
                 let albums = [];
                 let url = `https://api.spotify.com/v1/artists/${selectedArtist.id}/albums?include_groups=album,single&limit=50`;
                 
@@ -220,7 +218,6 @@
                     const data = await res.json();
                     albums.push(...data.items);
                     url = data.next;
-                    // レートリミット対策・軽いウェイト
                     await new Promise(r => setTimeout(r, 100));
                 }
 
@@ -233,7 +230,6 @@
                     while (trackUrl) {
                         const res = await fetch(trackUrl, { headers: { 'Authorization': `Bearer ${accessToken}` } });
                         if (res.status === 429) {
-                            // レートリミット時は少し待機
                             const retryAfter = res.headers.get('Retry-After') || 2;
                             await new Promise(r => setTimeout(r, retryAfter * 1000));
                             continue;
@@ -254,18 +250,16 @@
                     processedAlbums++;
                     let p = 30 + Math.floor((processedAlbums / albums.length) * 40);
                     updateProgress(`トラック取得中 (${processedAlbums}/${albums.length} アルバム)...`, p);
-                    await new Promise(r => setTimeout(r, 50)); // 負荷軽減
+                    await new Promise(r => setTimeout(r, 50));
                 }
 
                 const totalFetched = allTracks.length;
                 updateProgress('重複排除処理を実行中...', 75);
 
-                // 2.4 高度な重複排除ロジック
                 const normalizeTrackName = (name) => {
                     return name
                         .toLowerCase()
                         .normalize('NFKC')
-                        // 括弧書きやリマスター表記などを除去
                         .replace(/[\(\（].*?(remaster|live|mix|version|edit|mono|stereo|bonus|ic|ver\.?|alt).*?[\)\）]/gi, '')
                         .replace(/-\s*(remaster(ed)?|live|mono|stereo).*$/gi, '')
                         .trim();
@@ -276,7 +270,6 @@
                     const cleanName = normalizeTrackName(track.name);
                     if (!cleanName) return;
 
-                    // 曲の長さ（秒単位、許容差 ±2秒 = 2000ms）ですでに登録されているものがないか走査
                     let isDuplicate = false;
                     for (let [key, existingTrack] of uniqueTracksMap.entries()) {
                         if (key === cleanName) {
@@ -288,7 +281,6 @@
                     }
 
                     if (!isDuplicate) {
-                        // キーとして正規化名を使用（必要に応じてdurationも加味）
                         uniqueTracksMap.set(cleanName, track);
                     }
                 });
@@ -298,7 +290,6 @@
 
                 updateProgress('Spotifyにプレイリストを作成中...', 90);
 
-                // 2.5 プレイリストの作成と曲の追加
                 const userRes = await fetch('https://api.spotify.com/v1/me', {
                     headers: { 'Authorization': `Bearer ${accessToken}` }
                 });
@@ -318,7 +309,6 @@
                 });
                 const playlistData = await createPlaylistRes.json();
 
-                // 100曲ずつ分割して追加
                 const uris = finalTracks.map(t => t.uri);
                 for (let i = 0; i < uris.length; i += 100) {
                     const chunk = uris.slice(i, i + 100);
