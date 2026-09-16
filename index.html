@@ -307,6 +307,12 @@
                         public: false
                     })
                 });
+                if (!createPlaylistRes.ok) {
+                    const errData = await createPlaylistRes.json();
+                    throw new Error(`プレイリスト作成エラー: ${errData.error?.message || createPlaylistRes.statusText}`);
+                }
+
+                const playlistData = await createPlaylistRes.json();
                 const playlistData = await createPlaylistRes.json();
 
                 const uris = finalTracks.map(t => t.uri);
